@@ -12,3 +12,8 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres",
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15" # To load database URL from a .env file
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bcrypt = "0.15" # For secure password hashing
+jsonwebtoken = "9.0" # For building and validating JWTs
+tower-http = { version = "0.5", features = ["cors", "trace"] } # For middleware utilities
