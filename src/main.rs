@@ -1,4 +1,4 @@
-use axum::{routing::{get, post}, Router, routing::patch};
+use axum::{routing::{get, post}, Router};
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use dotenvy::dotenv;
@@ -19,12 +19,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     sqlx::migrate!("./migrations").run(&pool).await?;
 
-    // Build server application state router
     let app = Router::new()
-        // Public endpoints
+        // Auth Routes
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
-        // Sample protected route using our extractor
+        
+        // Organization and RBAC Engine Routes
+        .route("/organizations", post(handlers::org::create_organization))
+        .route("/organizations/:org_id/users", post(handlers::org::create_user_in_org))
+        
+        // authentication routes
         .route("/users/me", get(|user: middleware::AuthenticatedUser| async move {
             format!("Hello User! Your authenticated ID is: {}", user.user_id)
         }))

@@ -25,3 +25,23 @@ pub struct AuthResponse {
     pub access_token: String,
     pub token_type: String,
 }
+
+
+// allow admin to assign roles
+
+#[derive(serde::Deserialize)]
+pub struct CreateOrgRequest {
+    pub name: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct OrgResponse {
+    pub id: uuid::Uuid,
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct AssignRoleRequest {
+    pub user_id: uuid::Uuid,
+    pub role_name: String,
+}
