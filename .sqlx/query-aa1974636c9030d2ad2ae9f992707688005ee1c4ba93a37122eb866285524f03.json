@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS (\n            SELECT 1 \n            FROM memberships m\n            JOIN member_roles mr ON m.id = mr.membership_id\n            JOIN roles r ON mr.role_id = r.id\n            JOIN role_permissions rp ON r.id = rp.role_id\n            JOIN permissions p ON rp.permission_id = p.id\n            WHERE m.user_id = $1 \n              AND m.organization_id = $2 \n              AND r.organization_id = $2\n              AND p.name = $3\n        )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "aa1974636c9030d2ad2ae9f992707688005ee1c4ba93a37122eb866285524f03"
+}

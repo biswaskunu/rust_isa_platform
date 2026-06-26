@@ -23,6 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Auth Routes
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
+        .route("/sessions", get(handlers::auth::get_sessions))
         
         // Organization and RBAC Engine Routes
         .route("/organizations", post(handlers::org::create_organization))
