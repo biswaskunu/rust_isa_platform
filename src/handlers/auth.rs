@@ -1,3 +1,4 @@
+use axum::extract::Path;
 use axum::{extract::State, http::StatusCode, Json};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, Header, EncodingKey};
@@ -168,6 +169,30 @@ pub async fn update_profile(
 
     Ok(Json(updated_user))
 }
+
+// DELETE /sessions/{id}
+pub async fn revoke_session(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(session_id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let rows_affected = sqlx::query!(
+        "DELETE FROM sessions WHERE id = $1 AND user_id = $2",
+        session_id,
+        user.user_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .rows_affected();
+
+    if rows_affected == 0 {
+        return Err((StatusCode::NOT_FOUND, "Session not found".to_string()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 
 // POST /auth/logout
 pub async fn logout(

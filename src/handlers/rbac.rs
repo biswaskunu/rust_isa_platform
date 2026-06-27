@@ -1,4 +1,4 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+use axum::{extract::{Path, State, Query}, http::StatusCode, Json};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -7,6 +7,15 @@ use crate::models::{
     CreateRoleRequest, UpdateRoleRequest, RoleResponse, 
     CreatePermissionRequest, PermissionResponse
 };
+
+#[derive(serde::Deserialize)]
+pub struct RoleFilterParams {
+    pub search: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+
 
 // ==========================================
 // ROLES CRUD MANAGEMENT
@@ -31,14 +40,26 @@ pub async fn create_role(
     Ok(Json(role))
 }
 
-// GET /roles
+// GET /roles?search=Admin&limit=10&offset=0
 pub async fn list_roles(
     State(pool): State<PgPool>,
     _user: AuthenticatedUser,
+    Query(params): Query<RoleFilterParams>,
 ) -> Result<Json<Vec<RoleResponse>>, (StatusCode, String)> {
+    let search_pattern = format!("%{}%", params.search.unwrap_or_default());
+    let limit = params.limit.unwrap_or(20);
+    let offset = params.offset.unwrap_or(0);
+
     let roles = sqlx::query_as!(
         RoleResponse,
-        "SELECT id, organization_id, name FROM roles"
+        r#"
+        SELECT id, organization_id, name FROM roles 
+        WHERE name ILIKE $1
+        LIMIT $2 OFFSET $3
+        "#,
+        search_pattern,
+        limit,
+        offset
     )
     .fetch_all(&pool)
     .await
@@ -46,7 +67,6 @@ pub async fn list_roles(
 
     Ok(Json(roles))
 }
-
 // PATCH /roles/{id}
 pub async fn update_role(
     State(pool): State<PgPool>,

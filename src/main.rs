@@ -24,15 +24,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
         .route("/auth/logout", post(handlers::auth::logout))
+        
+        // Sessions Section
         .route("/sessions", get(handlers::auth::get_sessions))
-        .route("/users/me", get(handlers::auth::get_profile).patch(handlers::auth::update_profile)) // Chained patch here!
+        .route("/sessions/:id", delete(handlers::auth::revoke_session)) // <-- Added target session removal
+        
+        .route("/users/me", get(handlers::auth::get_profile).patch(handlers::auth::update_profile))
         
         // Organization Routes
-        .route("/organizations", post(handlers::org::create_organization).get(handlers::org::list_organizations)) // Chained get here!
-        .route("/organizations/:org_id", get(handlers::org::get_organization).patch(handlers::org::update_organization)) // New profile routes
+        .route("/organizations", post(handlers::org::create_organization).get(handlers::org::list_organizations))
+        .route("/organizations/:org_id", get(handlers::org::get_organization).patch(handlers::org::update_organization))
         .route("/organizations/:org_id/users", post(handlers::org::create_user_in_org))
+        .route("/organizations/:org_id/memberships", post(handlers::org::add_org_member)) // <-- Added membership routing management
         
-        // Roles CRUD Routes
+        // Roles CRUD Routes ( Chained GET now processes the new Filters )
         .route("/roles", post(handlers::rbac::create_role).get(handlers::rbac::list_roles))
         .route("/roles/:id", patch(handlers::rbac::update_role).delete(handlers::rbac::delete_role))
         
@@ -45,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         .with_state(pool);
 
+    
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     println!("🚀 IAM Gateway running on http://127.0.0.1:3000");
     axum::serve(listener, app).await?;

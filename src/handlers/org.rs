@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::middleware::AuthenticatedUser;
-use crate::models::{CreateOrgRequest, OrgResponse, UpdateOrgRequest};
+use crate::models::{CreateOrgRequest, OrgResponse, UpdateOrgRequest, AssignRoleRequest};
 
 
 
@@ -90,7 +90,28 @@ pub async fn create_user_in_org(
     Ok(format!("Successfully authorized! User {} was allowed to perform 'user:create' inside Organization {}", user.user_id, org_id))
 }
 
+// POST /organizations/:org_id/memberships
+pub async fn add_org_member(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(org_id): Path<Uuid>,
+    Json(payload): Json<AssignRoleRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // 1. RBAC Validation: Check if the calling actor has permission to manage members
+    check_permission(&pool, user.user_id, org_id, "user:create").await?;
 
+    // 2. Add the target user to memberships table
+    sqlx::query!(
+        "INSERT INTO memberships (user_id, organization_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        payload.user_id,
+        org_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to add member: {}", e)))?;
+
+    Ok(StatusCode::CREATED)
+}
 
 
 // auth chechk
