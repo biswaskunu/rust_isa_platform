@@ -6,6 +6,8 @@ use sqlx::PgPool;
 use chrono::{Utc, Duration};
 use serde::Serialize;
 use uuid::Uuid;
+use sha2::{Sha256, Digest};
+use hex;
 
 use crate::models::{RegisterRequest, LoginRequest, AuthResponse, Claims,UserProfile, UpdateProfileRequest};
 use crate::middleware::AuthenticatedUser;
@@ -91,11 +93,14 @@ pub async fn login(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Tx error".to_string()))?;
 
     let session_expiry = Utc::now() + Duration::days(7);
-    
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let token_hash = hex::encode(hasher.finalize());
+
     sqlx::query!(
         "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
         user.id,
-        &token[..30], // store a tiny fingerprint hash identifier of the token
+        &token_hash, // store the hashed token for session validation
         session_expiry
     )
     .execute(&mut *tx)

@@ -72,6 +72,18 @@ pub async fn create_organization(
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
+
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "ORGANIZATION_CREATED",
+        org.name
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
+
+
     tx.commit().await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Commit error".to_string()))?;
 
@@ -109,6 +121,17 @@ pub async fn add_org_member(
     .execute(&pool)
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to add member: {}", e)))?;
+
+
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "MEMBER_ADDED",
+        payload.user_id.to_string()
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
 
     Ok(StatusCode::CREATED)
 }

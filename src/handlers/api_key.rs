@@ -35,6 +35,17 @@ pub async fn create_api_key(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save API key: {}", e)))?;
 
+
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "API_KEY_CREATED",
+        payload.name
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
+
     Ok(Json(CreateApiKeyResponse {
         id: row.id,
         name: row.name,
@@ -78,6 +89,16 @@ pub async fn delete_api_key(
     if rows_affected == 0 {
         return Err((StatusCode::NOT_FOUND, "API Key not found or unauthorized".to_string()));
     }
+
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "API_KEY_DELETED",
+        key_id.to_string()
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
 
     Ok(StatusCode::NO_CONTENT)
 }

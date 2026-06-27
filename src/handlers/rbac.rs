@@ -24,7 +24,7 @@ pub struct RoleFilterParams {
 // POST /roles
 pub async fn create_role(
     State(pool): State<PgPool>,
-    _user: AuthenticatedUser, // Validates authentication
+    user: AuthenticatedUser, // Validates authentication
     Json(payload): Json<CreateRoleRequest>,
 ) -> Result<Json<RoleResponse>, (StatusCode, String)> {
     let role = sqlx::query_as!(
@@ -36,6 +36,19 @@ pub async fn create_role(
     .fetch_one(&pool)
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to create role: {}", e)))?;
+
+
+
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "ROLE_CREATED",
+        role.name
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
+
 
     Ok(Json(role))
 }
