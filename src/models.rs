@@ -105,3 +105,15 @@ pub struct ApiKeyResponse {
     pub name: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
+
+
+#[derive(serde::Deserialize)]
+pub struct UpdateOrgRequest {
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpdateProfileRequest {
+    pub email: Option<String>,
+    // You can add more fields here if your schema grows
+}

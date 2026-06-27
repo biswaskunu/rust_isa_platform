@@ -20,30 +20,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     let app = Router::new()
-        // Auth Routes
+        // Auth / User Routes
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
-        .route("/auth/logout", post(handlers::auth::logout)) // New real logout route
+        .route("/auth/logout", post(handlers::auth::logout))
         .route("/sessions", get(handlers::auth::get_sessions))
-        // Swapped out the old code block for the real DB handler here:
-        .route("/users/me", get(handlers::auth::get_profile))
-
+        .route("/users/me", get(handlers::auth::get_profile).patch(handlers::auth::update_profile)) // Chained patch here!
         
-        // Organization and RBAC Engine Routes
-        .route("/organizations", post(handlers::org::create_organization))
+        // Organization Routes
+        .route("/organizations", post(handlers::org::create_organization).get(handlers::org::list_organizations)) // Chained get here!
+        .route("/organizations/:org_id", get(handlers::org::get_organization).patch(handlers::org::update_organization)) // New profile routes
         .route("/organizations/:org_id/users", post(handlers::org::create_user_in_org))
         
+        // Roles CRUD Routes
         .route("/roles", post(handlers::rbac::create_role).get(handlers::rbac::list_roles))
         .route("/roles/:id", patch(handlers::rbac::update_role).delete(handlers::rbac::delete_role))
         
         // Permissions CRUD Routes
         .route("/permissions", post(handlers::rbac::create_permission).get(handlers::rbac::list_permissions))
-
-
+        
         // API Keys Management Routes
         .route("/api-keys", post(handlers::api_key::create_api_key).get(handlers::api_key::list_api_keys))
         .route("/api-keys/:id", delete(handlers::api_key::delete_api_key))
-         
         
         .with_state(pool);
 

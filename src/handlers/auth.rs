@@ -6,7 +6,7 @@ use chrono::{Utc, Duration};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::models::{RegisterRequest, LoginRequest, AuthResponse, Claims,UserProfile};
+use crate::models::{RegisterRequest, LoginRequest, AuthResponse, Claims,UserProfile, UpdateProfileRequest};
 use crate::middleware::AuthenticatedUser;
 
 #[derive(Serialize)]
@@ -126,7 +126,7 @@ pub async fn get_profile(
     State(pool): State<PgPool>,
     user: AuthenticatedUser,
 ) -> Result<Json<UserProfile>, (StatusCode, String)> {
-    
+
     let profile = sqlx::query_as!(
         UserProfile,
         "SELECT id, email, created_at FROM users WHERE id = $1",
@@ -138,6 +138,35 @@ pub async fn get_profile(
     .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
 
     Ok(Json(profile))
+}
+
+
+// PATCH /users/me
+pub async fn update_profile(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> Result<Json<UserProfile>, (StatusCode, String)> {
+    let current_profile = sqlx::query!("SELECT email FROM users WHERE id = $1", user.user_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    // Fallback to existing email if no new email is supplied in payload
+    let target_email = payload.email.unwrap_or(current_profile.email);
+
+    let updated_user = sqlx::query_as!(
+        UserProfile,
+        "UPDATE users SET email = $1 WHERE id = $2 RETURNING id, email, created_at",
+        target_email,
+        user.user_id
+    )
+    .fetch_one(&pool)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Profile update failed: {}", e)))?;
+
+    Ok(Json(updated_user))
 }
 
 // POST /auth/logout
@@ -157,8 +186,6 @@ pub async fn logout(
 
     Ok(StatusCode::OK)
 }
-
-
 
 // Get active sessions for the user
 pub async fn get_sessions(

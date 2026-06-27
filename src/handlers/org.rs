@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::middleware::AuthenticatedUser;
-use crate::models::{CreateOrgRequest, OrgResponse};
+use crate::models::{CreateOrgRequest, OrgResponse, UpdateOrgRequest};
 
 
 
@@ -90,6 +90,9 @@ pub async fn create_user_in_org(
     Ok(format!("Successfully authorized! User {} was allowed to perform 'user:create' inside Organization {}", user.user_id, org_id))
 }
 
+
+
+
 // auth chechk
 async fn check_permission(
     pool: &PgPool,
@@ -125,4 +128,84 @@ async fn check_permission(
     } else {
         Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()))
     }
+}
+
+
+// GET /organizations (Lists all organizations the user belongs to)
+pub async fn list_organizations(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<Json<Vec<OrgResponse>>, (StatusCode, String)> {
+    let orgs = sqlx::query_as!(
+        OrgResponse,
+        r#"
+        SELECT o.id, o.name 
+        FROM organizations o
+        JOIN memberships m ON o.id = m.organization_id
+        WHERE m.user_id = $1
+        "#,
+        user.user_id
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch organizations".to_string()))?;
+
+    Ok(Json(orgs))
+}
+
+// GET /organizations/{id}
+pub async fn get_organization(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(org_id): Path<Uuid>,
+) -> Result<Json<OrgResponse>, (StatusCode, String)> {
+    // Validate membership first
+    let is_member = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM memberships WHERE user_id = $1 AND organization_id = $2)",
+        user.user_id,
+        org_id
+    )
+    .fetch_one(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?;
+
+    if Some(true) != is_member {
+        return Err((StatusCode::FORBIDDEN, "Access Denied: You are not a member of this organization".to_string()));
+    }
+
+    let org = sqlx::query_as!(
+        OrgResponse,
+        "SELECT id, name FROM organizations WHERE id = $1",
+        org_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .ok_or((StatusCode::NOT_FOUND, "Organization not found".to_string()))?;
+
+    Ok(Json(org))
+}
+
+// PATCH /organizations/{id}
+pub async fn update_organization(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(org_id): Path<Uuid>,
+    Json(payload): Json<UpdateOrgRequest>,
+) -> Result<Json<OrgResponse>, (StatusCode, String)> {
+    // RBAC Check: Ensure the user has permission to update organizations
+    check_permission(&pool, user.user_id, org_id, "organization:update").await?;
+
+    let org = sqlx::query_as!(
+        OrgResponse,
+        "UPDATE organizations SET name = $1 WHERE id = $2 RETURNING id, name",
+        payload.name,
+        org_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .ok_or((StatusCode::NOT_FOUND, "Organization not found".to_string()))?;
+
+    Ok(Json(org))
 }
