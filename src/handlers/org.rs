@@ -46,17 +46,17 @@ pub async fn create_organization(
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    // Fetch the standard 'user:create' static permission ID we seeded in migrations
-    let perm = sqlx::query!("SELECT id FROM permissions WHERE name = 'user:create'")
+    let org_update_perm = sqlx::query!("SELECT id FROM permissions WHERE name = 'org:update'")
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
+
 
     // Attach the 'user:create' permission directly to our new Owner role
     sqlx::query!(
         "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
         role.id,
-        perm.id
+        org_update_perm.id
     )
     .execute(&mut *tx)
     .await
@@ -215,7 +215,7 @@ pub async fn update_organization(
     Json(payload): Json<UpdateOrgRequest>,
 ) -> Result<Json<OrgResponse>, (StatusCode, String)> {
     // RBAC Check: Ensure the user has permission to update organizations
-    check_permission(&pool, user.user_id, org_id, "organization:update").await?;
+    check_permission(&pool, user.user_id, org_id, "org:update").await?;
 
     let org = sqlx::query_as!(
         OrgResponse,

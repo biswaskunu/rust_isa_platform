@@ -30,9 +30,13 @@ where
         }
         let token = &auth_header[7..];
 
+
+        let jwt_secret = std::env::var("JWT_SECRET")
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Server misconfiguration".to_string()))?;
+
         let token_data = decode::<Claims>(
             token,
-            &DecodingKey::from_secret("secret_key".as_ref()),
+            &DecodingKey::from_secret(jwt_secret.as_bytes()),
             &Validation::default(),
         )
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;

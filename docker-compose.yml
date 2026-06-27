@@ -16,6 +16,7 @@ services:
       - "3000:3000"
     environment:
       - DATABASE_URL=postgres://postgres:securepassword123@db:5432/iam_db
+      - JWT_SECRET=super-secret-key
     depends_on:
       - db
 

@@ -82,7 +82,8 @@ pub async fn login(
         exp: expiration,
     };
 
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret("secret_key".as_ref()))
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes()))
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Token generation failed".to_string()))?;
 
     // Create session database record and log audit tracking
