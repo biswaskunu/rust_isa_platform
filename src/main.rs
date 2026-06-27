@@ -3,9 +3,9 @@ use sqlx::postgres::PgPoolOptions;
 use std::env;
 use dotenvy::dotenv;
 
-mod models;
-mod handlers;
-mod middleware;
+pub mod models;
+pub mod handlers;
+pub mod middleware;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

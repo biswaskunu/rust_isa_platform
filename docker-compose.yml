@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: securepassword123
+      POSTGRES_DB: iam_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://postgres:securepassword123@db:5432/iam_db
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
