@@ -6,7 +6,7 @@ use chrono::{Utc, Duration};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::models::{RegisterRequest, LoginRequest, AuthResponse, Claims};
+use crate::models::{RegisterRequest, LoginRequest, AuthResponse, Claims,UserProfile};
 use crate::middleware::AuthenticatedUser;
 
 #[derive(Serialize)]
@@ -118,6 +118,47 @@ pub async fn login(
         token_type: "Bearer".to_string(),
     }))
 }
+
+
+
+// GET /users/me
+pub async fn get_profile(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<Json<UserProfile>, (StatusCode, String)> {
+    
+    let profile = sqlx::query_as!(
+        UserProfile,
+        "SELECT id, email, created_at FROM users WHERE id = $1",
+        user.user_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    Ok(Json(profile))
+}
+
+// POST /auth/logout
+pub async fn logout(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // In a real scenario, you'd extract the specific session ID from the request.
+    // For simplicity, we will revoke all active sessions for this user.
+    sqlx::query!(
+        "DELETE FROM sessions WHERE user_id = $1",
+        user.user_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to logout".to_string()))?;
+
+    Ok(StatusCode::OK)
+}
+
+
 
 // Get active sessions for the user
 pub async fn get_sessions(

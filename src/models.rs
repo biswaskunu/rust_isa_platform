@@ -45,3 +45,63 @@ pub struct AssignRoleRequest {
     pub user_id: uuid::Uuid,
     pub role_name: String,
 }
+
+
+#[derive(serde::Serialize)]
+pub struct UserProfile {
+    pub id: uuid::Uuid,
+    pub email: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+
+
+#[derive(serde::Deserialize)]
+pub struct CreateRoleRequest {
+    pub organization_id: uuid::Uuid,
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpdateRoleRequest {
+    pub name: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct RoleResponse {
+    pub id: uuid::Uuid,
+    pub organization_id: uuid::Uuid,
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct CreatePermissionRequest {
+    pub name: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct PermissionResponse {
+    pub id: uuid::Uuid,
+    pub name: String,
+}
+
+
+// api keys payloads
+#[derive(serde::Deserialize)]
+pub struct CreateApiKeyRequest {
+    pub name: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct CreateApiKeyResponse {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub plaintext_key: String, // Only shown ONCE on creation
+}
+
+#[derive(serde::Serialize)]
+pub struct ApiKeyResponse {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}

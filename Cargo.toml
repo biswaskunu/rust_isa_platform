@@ -19,3 +19,6 @@ jsonwebtoken = "9.0" # For building and validating JWTs
 tower-http = { version = "0.5", features = ["cors", "trace"] } # For middleware utilities
 tower = "0.5.3"
 mime = "0.3.17"
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"

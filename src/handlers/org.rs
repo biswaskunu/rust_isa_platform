@@ -3,7 +3,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::middleware::AuthenticatedUser;
-use crate::models::{CreateOrgRequest, OrgResponse, AssignRoleRequest};
+use crate::models::{CreateOrgRequest, OrgResponse};
+
+
 
 // 1. Create a new organization and bootstrap its administrative roles
 pub async fn create_organization(
