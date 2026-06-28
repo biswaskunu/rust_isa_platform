@@ -15,6 +15,11 @@ pub struct RoleFilterParams {
     pub offset: Option<i64>,
 }
 
+#[derive(serde::Deserialize)]
+pub struct AssignPermissionRequest {
+    pub permission_id: uuid::Uuid,
+}
+
 
 
 // ==========================================
@@ -156,4 +161,34 @@ pub async fn list_permissions(
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to list permissions".to_string()))?;
 
     Ok(Json(permissions))
+}
+
+
+// POST /roles/:id/permissions
+pub async fn assign_permission_to_role(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(role_id): Path<Uuid>,
+    Json(payload): Json<AssignPermissionRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    sqlx::query!(
+        "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        role_id,
+        payload.permission_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to assign permission: {}", e)))?;
+
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "PERMISSION_ASSIGNED",
+        format!("role:{} permission:{}", role_id, payload.permission_id)
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
+
+    Ok(StatusCode::CREATED)
 }

@@ -117,3 +117,4 @@ pub struct UpdateProfileRequest {
     pub email: Option<String>,
     // You can add more fields here if your schema grows
 }
+

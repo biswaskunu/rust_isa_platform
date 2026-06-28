@@ -51,7 +51,6 @@ pub async fn create_organization(
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
 
-
     // Attach the 'user:create' permission directly to our new Owner role
     sqlx::query!(
         "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
@@ -61,6 +60,22 @@ pub async fn create_organization(
     .execute(&mut *tx)
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+
+    let role_assign_perm = sqlx::query!("SELECT id FROM permissions WHERE name = 'role:assign'")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
+
+    sqlx::query!(
+        "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
+        role.id,
+        role_assign_perm.id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
 
     // Assign this role to our user's membership
     sqlx::query!(
@@ -252,4 +267,52 @@ pub async fn update_organization(
     .ok_or((StatusCode::NOT_FOUND, "Organization not found".to_string()))?;
 
     Ok(Json(org))
+}
+
+
+
+#[derive(serde::Deserialize)]
+pub struct AssignMemberRoleRequest {
+    pub role_id: uuid::Uuid,
+}
+// POST /memberships/:id/roles
+pub async fn assign_role_to_membership(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(membership_id): Path<Uuid>,
+    Json(payload): Json<AssignMemberRoleRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // Verify the membership exists and get the org_id so we can RBAC check
+    let membership = sqlx::query!(
+        "SELECT organization_id FROM memberships WHERE id = $1",
+        membership_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .ok_or((StatusCode::NOT_FOUND, "Membership not found".to_string()))?;
+
+    // Only someone with role:assign permission in that org can do this
+    check_permission(&pool, user.user_id, membership.organization_id, "role:assign").await?;
+
+    sqlx::query!(
+        "INSERT INTO member_roles (membership_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        membership_id,
+        payload.role_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to assign role: {}", e)))?;
+
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "ROLE_ASSIGNED",
+        format!("membership:{} role:{}", membership_id, payload.role_id)
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
+
+    Ok(StatusCode::CREATED)
 }

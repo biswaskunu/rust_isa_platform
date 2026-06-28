@@ -36,10 +36,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/organizations/:org_id", get(handlers::org::get_organization).patch(handlers::org::update_organization))
         .route("/organizations/:org_id/users", post(handlers::org::create_user_in_org))
         .route("/organizations/:org_id/memberships", post(handlers::org::add_org_member)) // <-- Added membership routing management
+        .route("/memberships/:id/roles", post(handlers::org::assign_role_to_membership))
+
         
         // Roles CRUD Routes ( Chained GET now processes the new Filters )
         .route("/roles", post(handlers::rbac::create_role).get(handlers::rbac::list_roles))
         .route("/roles/:id", patch(handlers::rbac::update_role).delete(handlers::rbac::delete_role))
+        .route("/roles/:id/permissions", post(handlers::rbac::assign_permission_to_role))
         
         // Permissions CRUD Routes
         .route("/permissions", post(handlers::rbac::create_permission).get(handlers::rbac::list_permissions))
