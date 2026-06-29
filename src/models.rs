@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// goes inside our JWT token
+// used inside our JWT token
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Uuid,      // User ID
@@ -96,7 +96,7 @@ pub struct CreateApiKeyRequest {
 pub struct CreateApiKeyResponse {
     pub id: uuid::Uuid,
     pub name: String,
-    pub plaintext_key: String, // Only shown ONCE on creation
+    pub plaintext_key: String, 
 }
 
 #[derive(serde::Serialize)]

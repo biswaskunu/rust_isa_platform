@@ -8,23 +8,11 @@ use crate::models::{
     CreatePermissionRequest, PermissionResponse
 };
 
-#[derive(serde::Deserialize)]
-pub struct RoleFilterParams {
-    pub search: Option<String>,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-
-#[derive(serde::Deserialize)]
-pub struct AssignPermissionRequest {
-    pub permission_id: uuid::Uuid,
-}
 
 
 
-// ==========================================
+
 // ROLES CRUD MANAGEMENT
-// ==========================================
 
 // POST /roles
 pub async fn create_role(
@@ -32,6 +20,7 @@ pub async fn create_role(
     user: AuthenticatedUser, // Validates authentication
     Json(payload): Json<CreateRoleRequest>,
 ) -> Result<Json<RoleResponse>, (StatusCode, String)> {
+    
     let role = sqlx::query_as!(
         RoleResponse,
         "INSERT INTO roles (organization_id, name) VALUES ($1, $2) RETURNING id, organization_id, name",
@@ -41,7 +30,6 @@ pub async fn create_role(
     .fetch_one(&pool)
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to create role: {}", e)))?;
-
 
 
     sqlx::query!(
@@ -58,6 +46,12 @@ pub async fn create_role(
     Ok(Json(role))
 }
 
+#[derive(serde::Deserialize)]
+pub struct RoleFilterParams {
+    pub search: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
 // GET /roles?search=Admin&limit=10&offset=0
 pub async fn list_roles(
     State(pool): State<PgPool>,
@@ -85,6 +79,7 @@ pub async fn list_roles(
 
     Ok(Json(roles))
 }
+
 // PATCH /roles/{id}
 pub async fn update_role(
     State(pool): State<PgPool>,
@@ -125,9 +120,12 @@ pub async fn delete_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ==========================================
+
+
+
+
+
 // PERMISSIONS CRUD MANAGEMENT
-// ==========================================
 
 // POST /permissions
 pub async fn create_permission(
@@ -163,7 +161,10 @@ pub async fn list_permissions(
     Ok(Json(permissions))
 }
 
-
+#[derive(serde::Deserialize)]
+pub struct AssignPermissionRequest {
+    pub permission_id: uuid::Uuid,
+}
 // POST /roles/:id/permissions
 pub async fn assign_permission_to_role(
     State(pool): State<PgPool>,

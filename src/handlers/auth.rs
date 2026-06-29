@@ -19,14 +19,18 @@ pub struct SessionResponse {
     pub expires_at: chrono::DateTime<Utc>,
 }
 
+// registers user in users table and makes audit logs
 pub async fn register(
     State(pool): State<PgPool>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    // get password
     let hashed_password = hash(&payload.password, DEFAULT_COST)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password".to_string()))?;
 
     // Create a transaction block to insert user and write audit trail safely
+    // so if anything fails, it rolls back completely
+    
     let mut tx = pool.begin().await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Transaction error".to_string()))?;
 
@@ -38,6 +42,7 @@ pub async fn register(
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, format!("User registration failed: {}", e)))?;
+
 
     // Audit Log recording
     sqlx::query(
@@ -60,6 +65,7 @@ pub async fn login(
     State(pool): State<PgPool>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+
     let user = sqlx::query!("SELECT id, password_hash FROM users WHERE email = $1", payload.email)
         .fetch_optional(&pool)
         .await
@@ -100,7 +106,7 @@ pub async fn login(
     sqlx::query!(
         "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
         user.id,
-        &token_hash, // store the hashed token for session validation
+        &token_hash, // token for session validation
         session_expiry
     )
     .execute(&mut *tx)
@@ -126,7 +132,66 @@ pub async fn login(
     }))
 }
 
+// POST /auth/logout
+pub async fn logout(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // In a real scenario extract the specific session ID from the request.
+    // For simplicity, we will revoke all active sessions for this user.
+    sqlx::query!(
+        "DELETE FROM sessions WHERE user_id = $1",
+        user.user_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to logout".to_string()))?;
 
+    Ok(StatusCode::OK)
+}
+
+
+// Get active sessions for the user
+pub async fn get_sessions(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<Json<Vec<SessionResponse>>, (StatusCode, String)> {
+
+    let sessions = sqlx::query_as!(
+        SessionResponse,
+        "SELECT id, created_at, expires_at FROM sessions WHERE user_id = $1 AND expires_at > NOW()",
+        user.user_id
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load sessions".to_string()))?;
+
+    Ok(Json(sessions))
+}
+
+// DELETE /sessions/{id}
+pub async fn revoke_session(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(session_id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    
+    let rows_affected = sqlx::query!(
+        "DELETE FROM sessions WHERE id = $1 AND user_id = $2",
+        session_id,
+        user.user_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .rows_affected();
+
+    if rows_affected == 0 {
+        return Err((StatusCode::NOT_FOUND, "Session not found".to_string()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
 
 // GET /users/me
 pub async fn get_profile(
@@ -146,7 +211,6 @@ pub async fn get_profile(
 
     Ok(Json(profile))
 }
-
 
 // PATCH /users/me
 pub async fn update_profile(
@@ -176,61 +240,4 @@ pub async fn update_profile(
     Ok(Json(updated_user))
 }
 
-// DELETE /sessions/{id}
-pub async fn revoke_session(
-    State(pool): State<PgPool>,
-    user: AuthenticatedUser,
-    Path(session_id): Path<Uuid>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    let rows_affected = sqlx::query!(
-        "DELETE FROM sessions WHERE id = $1 AND user_id = $2",
-        session_id,
-        user.user_id
-    )
-    .execute(&pool)
-    .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-    .rows_affected();
 
-    if rows_affected == 0 {
-        return Err((StatusCode::NOT_FOUND, "Session not found".to_string()));
-    }
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-
-// POST /auth/logout
-pub async fn logout(
-    State(pool): State<PgPool>,
-    user: AuthenticatedUser,
-) -> Result<StatusCode, (StatusCode, String)> {
-    // In a real scenario, you'd extract the specific session ID from the request.
-    // For simplicity, we will revoke all active sessions for this user.
-    sqlx::query!(
-        "DELETE FROM sessions WHERE user_id = $1",
-        user.user_id
-    )
-    .execute(&pool)
-    .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to logout".to_string()))?;
-
-    Ok(StatusCode::OK)
-}
-
-// Get active sessions for the user
-pub async fn get_sessions(
-    State(pool): State<PgPool>,
-    user: AuthenticatedUser,
-) -> Result<Json<Vec<SessionResponse>>, (StatusCode, String)> {
-    let sessions = sqlx::query_as!(
-        SessionResponse,
-        "SELECT id, created_at, expires_at FROM sessions WHERE user_id = $1 AND expires_at > NOW()",
-        user.user_id
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load sessions".to_string()))?;
-
-    Ok(Json(sessions))
-}

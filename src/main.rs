@@ -24,16 +24,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
         .route("/auth/logout", post(handlers::auth::logout))
-        
         // Sessions Section
         .route("/sessions", get(handlers::auth::get_sessions))
         .route("/sessions/:id", delete(handlers::auth::revoke_session)) // <-- Added target session removal
-        
-        .route("/users/me", get(handlers::auth::get_profile).patch(handlers::auth::update_profile))
-        
+        .route("/users/me", get(handlers::auth::get_profile)
+                        .patch(handlers::auth::update_profile))
+                        // chained patch 
+
         // Organization Routes
-        .route("/organizations", post(handlers::org::create_organization).get(handlers::org::list_organizations))
-        .route("/organizations/:org_id", get(handlers::org::get_organization).patch(handlers::org::update_organization))
+        .route("/organizations", post(handlers::org::create_organization)
+            .get(handlers::org::list_organizations))
+        .route("/organizations/:org_id", get(handlers::org::get_organization)
+            .patch(handlers::org::update_organization))
         .route("/organizations/:org_id/users", post(handlers::org::create_user_in_org))
         .route("/organizations/:org_id/memberships", post(handlers::org::add_org_member)) // <-- Added membership routing management
         .route("/memberships/:id/roles", post(handlers::org::assign_role_to_membership))
@@ -43,7 +45,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/roles", post(handlers::rbac::create_role).get(handlers::rbac::list_roles))
         .route("/roles/:id", patch(handlers::rbac::update_role).delete(handlers::rbac::delete_role))
         .route("/roles/:id/permissions", post(handlers::rbac::assign_permission_to_role))
-        
         // Permissions CRUD Routes
         .route("/permissions", post(handlers::rbac::create_permission).get(handlers::rbac::list_permissions))
         
@@ -51,8 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api-keys", post(handlers::api_key::create_api_key).get(handlers::api_key::list_api_keys))
         .route("/api-keys/:id", delete(handlers::api_key::delete_api_key))
         
-        .with_state(pool);
 
+        .with_state(pool);
     
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     println!("🚀 IAM Gateway running on http://127.0.0.1:3000");

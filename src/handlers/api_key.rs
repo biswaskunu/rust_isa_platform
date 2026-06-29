@@ -13,6 +13,7 @@ pub async fn create_api_key(
     user: AuthenticatedUser,
     Json(payload): Json<CreateApiKeyRequest>,
 ) -> Result<Json<CreateApiKeyResponse>, (StatusCode, String)> {
+
     // 1. Generate a secure, unguessable random string
     let mut random_bytes = [0u8; 32];
     thread_rng().fill_bytes(&mut random_bytes);
@@ -36,6 +37,7 @@ pub async fn create_api_key(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save API key: {}", e)))?;
 
 
+    // audit logs
     sqlx::query!(
         "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
         user.user_id,
@@ -58,6 +60,7 @@ pub async fn list_api_keys(
     State(pool): State<PgPool>,
     user: AuthenticatedUser,
 ) -> Result<Json<Vec<ApiKeyResponse>>, (StatusCode, String)> {
+
     let keys = sqlx::query_as!(
         ApiKeyResponse,
         "SELECT id, name, created_at FROM api_keys WHERE user_id = $1",

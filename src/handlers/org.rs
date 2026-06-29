@@ -13,7 +13,7 @@ pub async fn create_organization(
     user: AuthenticatedUser,
     Json(payload): Json<CreateOrgRequest>,
 ) -> Result<Json<OrgResponse>, (StatusCode, String)> {
-    // Start a transaction so if anything fails, it rolls back completely
+
     let mut tx = pool.begin().await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Transaction error".to_string()))?;
 
@@ -46,7 +46,20 @@ pub async fn create_organization(
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let org_update_perm = sqlx::query!("SELECT id FROM permissions WHERE name = 'org:update'")
+    
+    // Assign this role to our user's membership
+    sqlx::query!(
+        "INSERT INTO member_roles (membership_id, role_id) VALUES ($1, $2)",
+        membership.id,
+        role.id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+
+    let org_update_perm = sqlx::query!(
+        "SELECT id FROM permissions WHERE name = 'org:update'")
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
@@ -62,7 +75,8 @@ pub async fn create_organization(
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
 
-    let role_assign_perm = sqlx::query!("SELECT id FROM permissions WHERE name = 'role:assign'")
+    let role_assign_perm = sqlx::query!(
+        "SELECT id FROM permissions WHERE name = 'role:assign'")
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
@@ -77,17 +91,7 @@ pub async fn create_organization(
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
 
-    // Assign this role to our user's membership
-    sqlx::query!(
-        "INSERT INTO member_roles (membership_id, role_id) VALUES ($1, $2)",
-        membership.id,
-        role.id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-
-
+    // audit logs
     sqlx::query!(
         "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
         user.user_id,
@@ -111,44 +115,10 @@ pub async fn create_user_in_org(
     user: AuthenticatedUser,
     Path(org_id): Path<Uuid>,
 ) -> Result<String, (StatusCode, String)> {
-    // Call our specialized validation logic
+    // Call validation logic
     check_permission(&pool, user.user_id, org_id, "user:create").await?;
 
     Ok(format!("Successfully authorized! User {} was allowed to perform 'user:create' inside Organization {}", user.user_id, org_id))
-}
-
-// POST /organizations/:org_id/memberships
-pub async fn add_org_member(
-    State(pool): State<PgPool>,
-    user: AuthenticatedUser,
-    Path(org_id): Path<Uuid>,
-    Json(payload): Json<AssignRoleRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    // 1. RBAC Validation: Check if the calling actor has permission to manage members
-    check_permission(&pool, user.user_id, org_id, "user:create").await?;
-
-    // 2. Add the target user to memberships table
-    sqlx::query!(
-        "INSERT INTO memberships (user_id, organization_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        payload.user_id,
-        org_id
-    )
-    .execute(&pool)
-    .await
-    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to add member: {}", e)))?;
-
-
-    sqlx::query!(
-        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
-        user.user_id,
-        "MEMBER_ADDED",
-        payload.user_id.to_string()
-    )
-    .execute(&pool)
-    .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
-
-    Ok(StatusCode::CREATED)
 }
 
 
@@ -159,6 +129,7 @@ async fn check_permission(
     org_id: Uuid,
     required_permission: &str,
 ) -> Result<(), (StatusCode, String)> {
+
     let has_access = sqlx::query_scalar!(
         r#"
         SELECT EXISTS (
@@ -190,11 +161,49 @@ async fn check_permission(
 }
 
 
+
+// POST /organizations/:org_id/memberships
+pub async fn add_org_member(
+    State(pool): State<PgPool>,
+    user: AuthenticatedUser,
+    Path(org_id): Path<Uuid>,
+    Json(payload): Json<AssignRoleRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // 1. RBAC Validation: Check if the calling actor has permission to manage members
+    check_permission(&pool, user.user_id, org_id, "user:create").await?;
+
+    // 2. Add the target user to memberships table
+    sqlx::query!(
+        "INSERT INTO memberships (user_id, organization_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        payload.user_id,
+        org_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to add member: {}", e)))?;
+
+
+    //audit logs
+    sqlx::query!(
+        "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
+        user.user_id,
+        "MEMBER_ADDED",
+        payload.user_id.to_string()
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
+
+    Ok(StatusCode::CREATED)
+}
+
+
 // GET /organizations (Lists all organizations the user belongs to)
 pub async fn list_organizations(
     State(pool): State<PgPool>,
     user: AuthenticatedUser,
 ) -> Result<Json<Vec<OrgResponse>>, (StatusCode, String)> {
+
     let orgs = sqlx::query_as!(
         OrgResponse,
         r#"
@@ -218,6 +227,7 @@ pub async fn get_organization(
     user: AuthenticatedUser,
     Path(org_id): Path<Uuid>,
 ) -> Result<Json<OrgResponse>, (StatusCode, String)> {
+
     // Validate membership first
     let is_member = sqlx::query_scalar!(
         "SELECT EXISTS(SELECT 1 FROM memberships WHERE user_id = $1 AND organization_id = $2)",
@@ -282,6 +292,7 @@ pub async fn assign_role_to_membership(
     Path(membership_id): Path<Uuid>,
     Json(payload): Json<AssignMemberRoleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    
     // Verify the membership exists and get the org_id so we can RBAC check
     let membership = sqlx::query!(
         "SELECT organization_id FROM memberships WHERE id = $1",
