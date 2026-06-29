@@ -1,19 +1,14 @@
-# Use the official Rust image to compile the application
+# Stage 1: Build
 FROM rust:latest as builder
 
 WORKDIR /usr/src/iam-platform
 COPY . .
 
-# Force SQLx to skip checking a live database during the build stage
 ENV SQLX_OFFLINE=true
 
-# Build the application in release mode for production efficiency
 RUN cargo build --release
 
-# Use a clean, minimal image to run the compiled binary
-FROM debian:bookworm-slim
-
-# Bypassing apt-get downloads by using a pre-configured slim rust image as the runner
+# Stage 2: Run
 FROM rust:1.78-slim
 
 WORKDIR /app
