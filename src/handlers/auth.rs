@@ -12,6 +12,22 @@ use hex;
 use crate::models::{RegisterRequest, LoginRequest, Claims,UserProfile, UpdateProfileRequest};
 use crate::middleware::AuthenticatedUser;
 
+
+//checking valid inputs
+fn validate_email(email: &str) -> bool {
+    // Basic check: has exactly one @, with content on both sides
+    let parts: Vec<&str> = email.split('@').collect();
+    if parts.len()  == 1 {
+        return false;
+    }
+
+    !parts[0].is_empty() && parts[1].contains('.')
+}
+
+fn validate_password(password: &str) -> bool {
+    password.len() >= 8
+}
+
 #[derive(Serialize)]
 pub struct SessionResponse {
     pub id: Uuid,
@@ -24,6 +40,14 @@ pub async fn register(
     State(pool): State<PgPool>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+
+    if !validate_email(&payload.email) {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Invalid email format".to_string()));
+    }
+    if !validate_password(&payload.password) {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Password must be at least 8 characters".to_string()));
+    }
+
     // get password
     let hashed_password = hash(&payload.password, DEFAULT_COST)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password".to_string()))?;
@@ -66,6 +90,14 @@ pub async fn login(
     State(pool): State<PgPool>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+
+    if !validate_email(&payload.email) {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Invalid email format".to_string()));
+    }
+    if payload.password.is_empty() {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Password is required".to_string()));
+    }
+
     let user = sqlx::query!(
         "SELECT id, email, password_hash FROM users WHERE email = $1",
         payload.email
@@ -230,7 +262,11 @@ pub async fn refresh_token(
     State(pool): State<PgPool>,
     Json(payload): Json<RefreshRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    
+
+    if payload.refresh_token.is_empty() {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Refresh token is required".to_string()));
+    }
+
     let jwt_secret = std::env::var("JWT_SECRET")
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Server misconfiguration".to_string()))?;
 
