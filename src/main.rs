@@ -3,6 +3,10 @@ use sqlx::postgres::PgPoolOptions;
 use std::env;
 use dotenvy::dotenv;
 
+// For tracing
+use tower_http::trace::TraceLayer;
+use tracing_subscriber;
+
 pub mod models;
 pub mod handlers;
 pub mod middleware;
@@ -10,6 +14,16 @@ pub mod middleware;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
+
+     // for structured logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "iam_platform=debug,tower_http=debug".into())
+        )
+        .init();
+
+
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let pool = PgPoolOptions::new()
@@ -53,6 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api-keys/:id", delete(handlers::api_key::delete_api_key))
         
 
+        .layer(TraceLayer::new_for_http())
         .with_state(pool);
     
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
