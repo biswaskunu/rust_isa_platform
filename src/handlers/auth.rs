@@ -1,15 +1,15 @@
 use axum::extract::Path;
 use axum::{extract::State, http::StatusCode, Json};
-use bcrypt::{hash, verify, DEFAULT_COST};
-use jsonwebtoken::{encode, Header, EncodingKey};
+use bcrypt::{hash, DEFAULT_COST};
+use jsonwebtoken::{decode, encode, Header, EncodingKey, DecodingKey, Validation};
 use sqlx::PgPool;
-use chrono::{Utc, Duration};
-use serde::Serialize;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use sha2::{Sha256, Digest};
 use hex;
 
-use crate::models::{RegisterRequest, LoginRequest, AuthResponse, Claims,UserProfile, UpdateProfileRequest};
+use crate::models::{RegisterRequest, LoginRequest, Claims,UserProfile, UpdateProfileRequest};
 use crate::middleware::AuthenticatedUser;
 
 #[derive(Serialize)]
@@ -61,76 +61,101 @@ pub async fn register(
     Ok(StatusCode::CREATED)
 }
 
+
 pub async fn login(
     State(pool): State<PgPool>,
     Json(payload): Json<LoginRequest>,
-) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let user = sqlx::query!(
+        "SELECT id, email, password_hash FROM users WHERE email = $1",
+        payload.email
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .ok_or((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()))?;
 
-    let user = sqlx::query!("SELECT id, password_hash FROM users WHERE email = $1", payload.email)
-        .fetch_optional(&pool)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-        .ok_or((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()))?;
-
-    let is_valid = verify(&payload.password, &user.password_hash)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify password".to_string()))?;
-
-    if !is_valid {
+    let valid = bcrypt::verify(&payload.password, &user.password_hash)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Auth error".to_string()))?;
+    if !valid {
         return Err((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()));
     }
 
-    let expiration_duration = Duration::minutes(15);
-    let expiration = Utc::now()
-        .checked_add_signed(expiration_duration)
-        .expect("valid timestamp")
-        .timestamp() as usize;
+    let access_token  = generate_token(user.id, "access", 15)?;
+    let refresh_token = generate_token(user.id, "refresh", 60 * 24 * 7)?; // 7 days
 
-    let claims = Claims {
-        sub: user.id,
-        exp: expiration,
-    };
+    let access_hash  = hash_token(&access_token);
+    let refresh_hash = hash_token(&refresh_token);
 
-    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes()))
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Token generation failed".to_string()))?;
-
-    // Create session database record and log audit tracking
-    let mut tx = pool.begin().await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Tx error".to_string()))?;
-
-    let session_expiry = Utc::now() + Duration::days(7);
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    let token_hash = hex::encode(hasher.finalize());
+    let session_expiry_time  = Utc::now() + chrono::Duration::minutes(15);
+    let refresh_expiry_time  = Utc::now() + chrono::Duration::days(7);
 
     sqlx::query!(
-        "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+        "INSERT INTO sessions (user_id, token_hash, expires_at, refresh_token_hash, refresh_token_expires_at)
+         VALUES ($1, $2, $3, $4, $5)",
         user.id,
-        &token_hash, // token for session validation
-        session_expiry
+        access_hash,
+        session_expiry_time,
+        refresh_hash,
+        refresh_expiry_time
     )
-    .execute(&mut *tx)
+    .execute(&pool)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Session error: {}", e)))?;
 
     sqlx::query!(
         "INSERT INTO audit_logs (actor_id, action, resource) VALUES ($1, $2, $3)",
         user.id,
         "USER_LOGGED_IN",
-        user.id.to_string()
+        user.email
     )
-    .execute(&mut *tx)
+    .execute(&pool)
     .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log fail".to_string()))?;
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Audit log failed".to_string()))?;
 
-    tx.commit().await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Commit error".to_string()))?;
-
-    Ok(Json(AuthResponse {
-        access_token: token,
-        token_type: "Bearer".to_string(),
-    }))
+    Ok(Json(serde_json::json!({
+        "access_token":  access_token,
+        "refresh_token": refresh_token,
+        "token_type":    "Bearer",
+        "expires_in":    900
+    })))
 }
+
+fn generate_token(
+    user_id: Uuid,
+    token_type: &str,
+    duration_minutes: i64
+) -> Result<String, (StatusCode, String)> {
+
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Server misconfiguration".to_string()))?;
+
+    let expiry = Utc::now()
+        .checked_add_signed(chrono::Duration::minutes(duration_minutes))
+        .unwrap();
+
+    let claims = Claims {
+        sub: user_id,
+        exp: expiry.timestamp() as usize,
+        token_type: token_type.to_string(),
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Token generation failed".to_string()))
+}
+
+fn hash_token(
+    token: &str
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 
 // POST /auth/logout
 pub async fn logout(
@@ -151,6 +176,8 @@ pub async fn logout(
 }
 
 
+
+// SESSIONS MANAGEMENT
 // Get active sessions for the user
 pub async fn get_sessions(
     State(pool): State<PgPool>,
@@ -192,6 +219,84 @@ pub async fn revoke_session(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+
+#[derive(Deserialize)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+pub async fn refresh_token(
+    State(pool): State<PgPool>,
+    Json(payload): Json<RefreshRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Server misconfiguration".to_string()))?;
+
+    // Decode and validate it's actually a refresh token
+    let token_data = decode::<Claims>(
+        &payload.refresh_token,
+        &DecodingKey::from_secret(jwt_secret.as_bytes()),
+        &Validation::default(),
+    )
+    .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired refresh token".to_string()))?;
+
+    if token_data.claims.token_type != "refresh" {
+        return Err((StatusCode::UNAUTHORIZED, "Wrong token type".to_string()));
+    }
+
+    let user_id = Uuid::parse_str(&token_data.claims.sub.to_string())
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token subject".to_string()))?;
+
+    let refresh_hash = hash_token(&payload.refresh_token);
+
+    // Look up the session by refresh token hash
+    let session = sqlx::query!(
+        "SELECT id FROM sessions
+         WHERE refresh_token_hash = $1
+           AND refresh_token_expires_at > NOW()",
+        refresh_hash
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+    .ok_or((StatusCode::UNAUTHORIZED, "Refresh token not found or expired".to_string()))?;
+
+    // Issue new access + refresh tokens (rotation)
+    let new_access  = generate_token(user_id, "access", 15)?;
+    let new_refresh = generate_token(user_id, "refresh", 60 * 24 * 7)?;
+
+    let new_access_hash  = hash_token(&new_access);
+    let new_refresh_hash = hash_token(&new_refresh);
+
+    let new_session_expiry = Utc::now() + chrono::Duration::minutes(15);
+    let new_refresh_expiry = Utc::now() + chrono::Duration::days(7);
+
+    // Update the existing session row with new tokens
+    sqlx::query!(
+        "UPDATE sessions
+         SET token_hash = $1, expires_at = $2,
+             refresh_token_hash = $3, refresh_token_expires_at = $4
+         WHERE id = $5",
+        new_access_hash,
+        new_session_expiry,
+        new_refresh_hash,
+        new_refresh_expiry,
+        session.id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Session update failed".to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "access_token":  new_access,
+        "refresh_token": new_refresh,
+        "token_type":    "Bearer",
+        "expires_in":    900
+    })))
+}
+
 
 // GET /users/me
 pub async fn get_profile(
@@ -239,5 +344,7 @@ pub async fn update_profile(
 
     Ok(Json(updated_user))
 }
+
+
 
 

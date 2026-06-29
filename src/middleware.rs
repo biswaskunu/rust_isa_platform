@@ -40,6 +40,11 @@ where
             &Validation::default(),
         )
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()))?;
+    
+        // Ensure the token type is "access" and not "refresh"
+        if token_data.claims.token_type != "access" {
+            return Err((StatusCode::UNAUTHORIZED, "Wrong token type".to_string()));
+        }
 
         Ok(AuthenticatedUser {
             user_id: token_data.claims.sub,

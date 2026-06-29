@@ -6,6 +6,7 @@ use uuid::Uuid;
 pub struct Claims {
     pub sub: Uuid,      // User ID
     pub exp: usize,     // Expiration timestamp
+    pub token_type: String, // "access" or "refresh"
 }
 
 #[derive(Deserialize)]

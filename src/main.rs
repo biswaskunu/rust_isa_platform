@@ -24,12 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
         .route("/auth/logout", post(handlers::auth::logout))
+        .route("/auth/refresh", post(handlers::auth::refresh_token))
         // Sessions Section
         .route("/sessions", get(handlers::auth::get_sessions))
         .route("/sessions/:id", delete(handlers::auth::revoke_session)) // <-- Added target session removal
         .route("/users/me", get(handlers::auth::get_profile)
                         .patch(handlers::auth::update_profile))
-                        // chained patch 
 
         // Organization Routes
         .route("/organizations", post(handlers::org::create_organization)
