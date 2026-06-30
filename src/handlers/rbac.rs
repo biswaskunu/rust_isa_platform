@@ -5,7 +5,8 @@ use uuid::Uuid;
 use crate::middleware::AuthenticatedUser;
 use crate::models::{
     CreateRoleRequest, UpdateRoleRequest, RoleResponse, 
-    CreatePermissionRequest, PermissionResponse
+    CreatePermissionRequest, PermissionResponse, RoleFilterParams,
+    AssignPermissionRequest
 };
 
 
@@ -14,13 +15,54 @@ use crate::models::{
 
 // ROLES CRUD MANAGEMENT
 
+
+// check permission
+async fn check_permission(
+    pool: &PgPool,
+    user_id: Uuid,
+    required_permission: &str,
+) -> Result<(), (StatusCode, String)> {
+
+    let has_access = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM memberships m
+            JOIN member_roles mr ON m.id = mr.membership_id
+            JOIN roles r ON mr.role_id = r.id
+            JOIN role_permissions rp ON r.id = rp.role_id
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE m.user_id = $1 AND p.name = $2
+        )
+        "#,
+        user_id,
+        required_permission
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Auth Engine processing error".to_string()))?;
+
+    if Some(true) == has_access {
+        Ok(())
+    } else {
+        Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()))
+    }
+}
+
+
+
 // POST /roles
 pub async fn create_role(
     State(pool): State<PgPool>,
     user: AuthenticatedUser, // Validates authentication
     Json(payload): Json<CreateRoleRequest>,
 ) -> Result<Json<RoleResponse>, (StatusCode, String)> {
-    
+
+
+    if check_permission(&pool, user.user_id, "role:create")
+        .await.is_err() {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+
     let role = sqlx::query_as!(
         RoleResponse,
         "INSERT INTO roles (organization_id, name) VALUES ($1, $2) RETURNING id, organization_id, name",
@@ -46,18 +88,19 @@ pub async fn create_role(
     Ok(Json(role))
 }
 
-#[derive(serde::Deserialize)]
-pub struct RoleFilterParams {
-    pub search: Option<String>,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
 // GET /roles?search=Admin&limit=10&offset=0
 pub async fn list_roles(
     State(pool): State<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     Query(params): Query<RoleFilterParams>,
 ) -> Result<Json<Vec<RoleResponse>>, (StatusCode, String)> {
+
+
+    if check_permission(&pool, user.user_id, "role:list")
+        .await.is_err() {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+
     let search_pattern = format!("%{}%", params.search.unwrap_or_default());
     let limit = params.limit.unwrap_or(20);
     let offset = params.offset.unwrap_or(0);
@@ -83,10 +126,17 @@ pub async fn list_roles(
 // PATCH /roles/{id}
 pub async fn update_role(
     State(pool): State<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     Path(role_id): Path<Uuid>,
     Json(payload): Json<UpdateRoleRequest>,
 ) -> Result<Json<RoleResponse>, (StatusCode, String)> {
+
+
+    if check_permission(&pool, user.user_id, "role:update")
+        .await.is_err() {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+    
     let role = sqlx::query_as!(
         RoleResponse,
         "UPDATE roles SET name = $1 WHERE id = $2 RETURNING id, organization_id, name",
@@ -104,9 +154,15 @@ pub async fn update_role(
 // DELETE /roles/{id}
 pub async fn delete_role(
     State(pool): State<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     Path(role_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+
+    if check_permission(&pool, user.user_id, "role:delete")
+        .await.is_err() {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+
     let rows_affected = sqlx::query!("DELETE FROM roles WHERE id = $1", role_id)
         .execute(&pool)
         .await
@@ -122,17 +178,20 @@ pub async fn delete_role(
 
 
 
-
-
-
 // PERMISSIONS CRUD MANAGEMENT
 
 // POST /permissions
 pub async fn create_permission(
     State(pool): State<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     Json(payload): Json<CreatePermissionRequest>,
 ) -> Result<Json<PermissionResponse>, (StatusCode, String)> {
+
+    if check_permission(&pool, user.user_id, "permission:create")
+        .await.is_err() {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+
     let permission = sqlx::query_as!(
         PermissionResponse,
         "INSERT INTO permissions (name) VALUES ($1) RETURNING id, name",
@@ -148,8 +207,14 @@ pub async fn create_permission(
 // GET /permissions
 pub async fn list_permissions(
     State(pool): State<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<Json<Vec<PermissionResponse>>, (StatusCode, String)> {
+
+    if check_permission(&pool, user.user_id, "permission:list")
+        .await.is_err() {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+
     let permissions = sqlx::query_as!(
         PermissionResponse,
         "SELECT id, name FROM permissions"
@@ -161,10 +226,7 @@ pub async fn list_permissions(
     Ok(Json(permissions))
 }
 
-#[derive(serde::Deserialize)]
-pub struct AssignPermissionRequest {
-    pub permission_id: uuid::Uuid,
-}
+
 // POST /roles/:id/permissions
 pub async fn assign_permission_to_role(
     State(pool): State<PgPool>,
@@ -172,6 +234,12 @@ pub async fn assign_permission_to_role(
     Path(role_id): Path<Uuid>,
     Json(payload): Json<AssignPermissionRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+
+    if check_permission(&pool, user.user_id, "role:update")
+        .await.is_err() {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+
     sqlx::query!(
         "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         role_id,

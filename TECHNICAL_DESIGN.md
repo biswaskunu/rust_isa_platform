@@ -11,6 +11,7 @@ Alongside this core authorization engine, the platform provides session manageme
 ## 2. Architecture
 
 ![Architecture diagram](docs/diagrams/architecture.svg)
+
 The application is a single Axum binary backed by one PostgreSQL database. There is no separate service layer or message queue; at this scale a monolith with clear module boundaries is the right tradeoff (see Tradeoffs section).
 
 Request flow: a client sends an HTTP request, which the Axum router matches to a handler function. For any route requiring authentication, the `AuthenticatedUser` extractor runs first as part of Axum's `FromRequestParts` mechanism — it pulls the `Authorization` header, decodes and validates the JWT, and rejects the request before the handler body ever executes if the token is missing, malformed, expired, or the wrong type (refresh tokens cannot be used as access tokens). If validation succeeds, the handler receives a `user_id` and proceeds with its business logic, which in most cases includes an explicit RBAC permission check before touching the database, then a database operation via SQLx, and finally a response.
@@ -34,6 +35,7 @@ This is a deliberately flat structure rather than the `handlers/services/reposit
 ## 3. Database design
 
 ![Entity relationship diagram](docs/diagrams/erd.svg)
+
 See the ERD shared in this conversation for the full entity relationship diagram. The schema is split across four migrations, applied in order by `sqlx::migrate!` at startup:
 
 - `init_schema` — users, organizations, memberships, roles, permissions, and the two join tables (`role_permissions`, `member_roles`)
@@ -62,6 +64,7 @@ Status codes follow standard REST conventions: `201` for creation, `200` for rea
 ## 5. Authentication flow
 
 ![Authentication flow diagram](docs/diagrams/auth_flow.svg)
+
 See the auth flow diagram shared above for the full sequence. The summary: login verifies the bcrypt password hash, then issues two JWTs — a 15-minute access token and a 7-day refresh token — both of which are hashed and stored in the sessions table alongside their respective expiry times. The client sends the access token on every subsequent request via the `Authorization: Bearer` header.
 
 Each JWT carries a `token_type` claim of either `"access"` or `"refresh"`. The `AuthenticatedUser` middleware explicitly rejects any token where `token_type != "access"`, which prevents a client from using a long-lived refresh token to authenticate normal requests — refresh tokens have exactly one valid use, hitting `/auth/refresh`.
@@ -82,11 +85,9 @@ When the access token expires, the client calls `POST /auth/refresh` with the re
 
 ## 7. Tradeoffs
 
-**Monolith instead of services-per-domain.** A single Axum binary is simpler to develop, test, and deploy than splitting auth, RBAC, and API keys into separate services. The cost is that everything currently scales together; if API key validation traffic ever dramatically outpaced everything else, it couldn't be scaled independently. For the current scope, this tradeoff favors simplicity.
+**Monolith instead of services-per-domain.** A single Axum binary is simpler to develop, test and deploy than splitting auth, RBAC and API keys into separate services. The cost is that everything currently scales together; if API key validation traffic ever dramatically outpaced everything else, it couldn't be scaled independently. For the current scope, this tradeoff favors simplicity.
 
-**No Redis caching for permission checks.** Every `check_permission` call hits PostgreSQL with a join across five tables (memberships → member_roles → roles → role_permissions → permissions). This is correct and simple, but not the fastest possible path at high request volume. Caching role-permission lookups in Redis was considered and deferred — it's listed as a "Recommended" feature in the project spec rather than mandatory, and introducing a cache invalidation strategy (what happens when a role's permissions change mid-cache-lifetime) adds real complexity that isn't justified until the access-check path is demonstrated to be a bottleneck.
-
-**No separate `services/` or `repositories/` layer.** As discussed in Architecture, handlers call SQLx directly. This trades some textbook layering purity for less indirection in a codebase of this size. The tradeoff would flip if the project grew enough that the same query logic needed to be reused across many handlers.
+**No Redis caching for permission checks.** Every `check_permission` call hits PostgreSQL with a join across five tables (memberships → member_roles → roles → role_permissions → permissions). This is correct and simple but not the fastest possible path at high request volume. Caching role-permission lookups in Redis was considered and deferred — it's listed as a "Recommended" feature in the project spec rather than mandatory and introducing a cache invalidation strategy (what happens when a role's permissions change mid-cache-lifetime) adds real complexity that isn't justified until the access-check path is demonstrated to be a bottleneck.
 
 **Sessions table stores both access and refresh token hashes in one row rather than two separate tables.** This keeps the schema simpler (one row per login, easy to query for "active sessions") at the cost of slightly conflating two different lifecycles (15 minutes vs. 7 days) in one row. A two-table design would let access tokens be revoked independently of their refresh token, which isn't currently needed since logout already revokes the whole session.
 

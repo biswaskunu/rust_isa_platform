@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::middleware::AuthenticatedUser;
-use crate::models::{CreateOrgRequest, OrgResponse, UpdateOrgRequest, AssignRoleRequest};
+use crate::models::{CreateOrgRequest, OrgResponse, UpdateOrgRequest, AssignRoleRequest, AssignMemberRoleRequest};
 
 
 
@@ -279,12 +279,6 @@ pub async fn update_organization(
     Ok(Json(org))
 }
 
-
-
-#[derive(serde::Deserialize)]
-pub struct AssignMemberRoleRequest {
-    pub role_id: uuid::Uuid,
-}
 // POST /memberships/:id/roles
 pub async fn assign_role_to_membership(
     State(pool): State<PgPool>,

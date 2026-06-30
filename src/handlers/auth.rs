@@ -4,12 +4,13 @@ use bcrypt::{hash, DEFAULT_COST};
 use jsonwebtoken::{decode, encode, Header, EncodingKey, DecodingKey, Validation};
 use sqlx::PgPool;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use sha2::{Sha256, Digest};
 use hex;
 
-use crate::models::{RegisterRequest, LoginRequest, Claims,UserProfile, UpdateProfileRequest};
+use crate::models::{RegisterRequest, LoginRequest, Claims,UserProfile,
+    UpdateProfileRequest, SessionResponse, RefreshRequest
+};
 use crate::middleware::AuthenticatedUser;
 
 
@@ -28,12 +29,6 @@ fn validate_password(password: &str) -> bool {
     password.len() >= 8
 }
 
-#[derive(Serialize)]
-pub struct SessionResponse {
-    pub id: Uuid,
-    pub created_at: chrono::DateTime<Utc>,
-    pub expires_at: chrono::DateTime<Utc>,
-}
 
 // registers user in users table and makes audit logs
 pub async fn register(
@@ -254,10 +249,6 @@ pub async fn revoke_session(
 }
 
 
-#[derive(Deserialize)]
-pub struct RefreshRequest {
-    pub refresh_token: String,
-}
 
 pub async fn refresh_token(
     State(pool): State<PgPool>,
