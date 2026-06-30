@@ -109,6 +109,7 @@ pub async fn login(
 
     let valid = bcrypt::verify(&payload.password, &user.password_hash)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Auth error".to_string()))?;
+    
     if !valid {
         return Err((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()));
     }
@@ -282,8 +283,7 @@ pub async fn refresh_token(
         return Err((StatusCode::UNAUTHORIZED, "Wrong token type".to_string()));
     }
 
-    let user_id = Uuid::parse_str(&token_data.claims.sub.to_string())
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token subject".to_string()))?;
+    let user_id = token_data.claims.sub;
 
     let refresh_hash = hash_token(&payload.refresh_token);
 
@@ -384,3 +384,127 @@ pub async fn update_profile(
 
 
 
+
+
+// TESTS
+
+// NOTE: tests in this module mutate the JWT_SECRET env var 
+// run single-threaded: `cargo test -- --test-threads=1` for reliable results
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcrypt::{hash, verify, DEFAULT_COST};
+
+    #[test]
+    fn test_valid_email_formats() {
+        assert!(validate_email("user@example.com"));
+        assert!(validate_email("user.name@domain.co.uk"));
+        assert!(validate_email("user+tag@example.org"));
+    }
+
+    #[test]
+    fn test_invalid_email_formats() {
+        assert!(!validate_email("notanemail"));
+        assert!(!validate_email("missing@dotcom"));
+        assert!(!validate_email("@nodomain.com"));
+        assert!(!validate_email(""));
+        assert!(!validate_email("two@@at.com"));
+    }
+
+    #[test]
+    fn test_password_validation() {
+        assert!(validate_password("password123"));
+        assert!(validate_password("exactly8"));
+        assert!(!validate_password("short"));
+        assert!(!validate_password(""));
+        assert!(!validate_password("1234567")); // 7 chars, one under limit
+    }
+
+    #[test]
+    fn test_password_hashing_and_verification() {
+        let password = "mysecretpassword";
+        let hashed = hash(password, DEFAULT_COST).unwrap();
+
+        // Hash should not equal plaintext
+        assert_ne!(password, hashed);
+
+        // Correct password should verify
+        assert!(verify(password, &hashed).unwrap());
+
+        // Wrong password should not verify
+        assert!(!verify("wrongpassword", &hashed).unwrap());
+    }
+
+    #[test]
+    fn test_hash_token_is_deterministic() {
+        let token = "some.jwt.token";
+        let hash1 = hash_token(token);
+        let hash2 = hash_token(token);
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_token_different_inputs() {
+        let hash1 = hash_token("token.one");
+        let hash2 = hash_token("token.two");
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_token_is_64_chars() {
+        // SHA-256 hex output is always 64 characters
+        let result = hash_token("any.input.token");
+        assert_eq!(result.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn test_generate_token_contains_correct_type() {
+        unsafe {
+            std::env::set_var("JWT_SECRET", "test-secret-for-unit-tests");
+        }
+        let user_id = uuid::Uuid::new_v4();
+
+        let access_token = generate_token(user_id, "access", 15).unwrap();
+        let refresh_token = generate_token(user_id, "refresh", 60).unwrap();
+
+        // Decode and verify token_type claim
+        let jwt_secret = std::env::var("JWT_SECRET").unwrap();
+
+        let access_data = jsonwebtoken::decode::<Claims>(
+            &access_token,
+            &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
+            &jsonwebtoken::Validation::default(),
+        ).unwrap();
+
+        let refresh_data = jsonwebtoken::decode::<Claims>(
+            &refresh_token,
+            &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
+            &jsonwebtoken::Validation::default(),
+        ).unwrap();
+
+        assert_eq!(access_data.claims.token_type, "access");
+        assert_eq!(refresh_data.claims.token_type, "refresh");
+        assert_eq!(access_data.claims.sub, user_id);
+    }
+
+    #[tokio::test]
+    async fn test_generate_token_expiry() {
+        unsafe {
+            std::env::set_var("JWT_SECRET", "test-secret-for-unit-tests");
+        }
+        let user_id = uuid::Uuid::new_v4();
+
+        let token = generate_token(user_id, "access", 15).unwrap();
+
+        let jwt_secret = std::env::var("JWT_SECRET").unwrap();
+        let data = jsonwebtoken::decode::<Claims>(
+            &token,
+            &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
+            &jsonwebtoken::Validation::default(),
+        ).unwrap();
+
+        // Expiry should be in the future
+        let now = chrono::Utc::now().timestamp() as usize;
+        assert!(data.claims.exp > now);
+    }
+}
