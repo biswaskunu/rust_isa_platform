@@ -58,13 +58,15 @@ pub async fn create_organization(
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
 
+
+    // PERMISSIONS
+
     let org_update_perm = sqlx::query!(
         "SELECT id FROM permissions WHERE name = 'org:update'")
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
 
-    // Attach the 'user:create' permission directly to our new Owner role
     sqlx::query!(
         "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
         role.id,
@@ -74,6 +76,21 @@ pub async fn create_organization(
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
+
+    let role_create_perm = sqlx::query!(
+        "SELECT id FROM permissions WHERE name = 'role:create'")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
+
+    sqlx::query!(
+        "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
+        role.id,
+        role_create_perm.id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let role_assign_perm = sqlx::query!(
         "SELECT id FROM permissions WHERE name = 'role:assign'")

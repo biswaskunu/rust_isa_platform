@@ -350,6 +350,7 @@ pub async fn update_profile(
     user: AuthenticatedUser,
     Json(payload): Json<UpdateProfileRequest>,
 ) -> Result<Json<UserProfile>, (StatusCode, String)> {
+    
     let current_profile = sqlx::query!("SELECT email FROM users WHERE id = $1", user.user_id)
         .fetch_optional(&pool)
         .await
@@ -371,10 +372,6 @@ pub async fn update_profile(
 
     Ok(Json(updated_user))
 }
-
-
-
-
 
 
 // TESTS

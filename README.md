@@ -1,6 +1,6 @@
 # IAM Platform
 
-A production-grade Identity & Access Management backend built with Rust, Axum, and PostgreSQL.
+A production-grade Identity & Access Management backend built with Rust, Axum and PostgreSQL.
 
 ## Stack
 
