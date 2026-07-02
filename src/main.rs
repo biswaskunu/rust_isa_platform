@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/refresh", post(handlers::auth::refresh_token))
         // Sessions Section
         .route("/sessions", get(handlers::auth::get_sessions))
-        .route("/sessions/:id", delete(handlers::auth::revoke_session)) // <-- Added target session removal
+        .route("/sessions/:id", delete(handlers::auth::revoke_session)) 
         .route("/users/me", get(handlers::auth::get_profile)
                         .patch(handlers::auth::update_profile))
 
@@ -51,16 +51,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/organizations/:org_id", get(handlers::org::get_organization)
             .patch(handlers::org::update_organization))
         .route("/organizations/:org_id/users", post(handlers::org::create_user_in_org))
-        .route("/organizations/:org_id/memberships", post(handlers::org::add_org_member)) // <-- Added membership routing management
+        .route("/organizations/:org_id/memberships", post(handlers::org::add_org_member))
         .route("/memberships/:id/roles", post(handlers::org::assign_role_to_membership))
 
+        // Permissions CRUD Routes
+        .route("/permissions", post(handlers::rbac::create_permission).get(handlers::rbac::list_permissions))
         
         // Roles CRUD Routes ( Chained GET now processes the new Filters )
         .route("/roles", post(handlers::rbac::create_role).get(handlers::rbac::list_roles))
         .route("/roles/:id", patch(handlers::rbac::update_role).delete(handlers::rbac::delete_role))
         .route("/roles/:id/permissions", post(handlers::rbac::assign_permission_to_role))
-        // Permissions CRUD Routes
-        .route("/permissions", post(handlers::rbac::create_permission).get(handlers::rbac::list_permissions))
         
         // API Keys Management Routes
         .route("/api-keys", post(handlers::api_key::create_api_key).get(handlers::api_key::list_api_keys))

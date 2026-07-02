@@ -55,8 +55,8 @@ pub async fn create_role(
 ) -> Result<Json<RoleResponse>, (StatusCode, String)> {
 
 
-    if check_permission(&pool, user.user_id, "role:create")
-        .await.is_err() {
+    if check_permission(&pool, user.user_id, "role:create").await.is_err()
+    {
             return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
     }
 
@@ -88,9 +88,14 @@ pub async fn create_role(
 // GET /roles?search=Admin&limit=10&offset=0
 pub async fn list_roles(
     State(pool): State<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     Query(params): Query<RoleFilterParams>,
 ) -> Result<Json<Vec<RoleResponse>>, (StatusCode, String)> {
+
+    if check_permission(&pool, user.user_id, "role:read").await.is_err()
+    {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
 
 
     let search_pattern = format!("%{}%", params.search.unwrap_or_default());
@@ -124,8 +129,8 @@ pub async fn update_role(
 ) -> Result<Json<RoleResponse>, (StatusCode, String)> {
 
 
-    if check_permission(&pool, user.user_id, "role:assign")
-        .await.is_err() {
+    if check_permission(&pool, user.user_id, "role:update").await.is_err()
+    {
             return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
     }
     
@@ -150,8 +155,8 @@ pub async fn delete_role(
     Path(role_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
 
-    if check_permission(&pool, user.user_id, "role:assign")
-        .await.is_err() {
+    if check_permission(&pool, user.user_id, "role:delete").await.is_err()
+    {
             return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
     }
 
@@ -179,8 +184,8 @@ pub async fn create_permission(
     Json(payload): Json<CreatePermissionRequest>,
 ) -> Result<Json<PermissionResponse>, (StatusCode, String)> {
 
-    if check_permission(&pool, user.user_id, "org:update")
-        .await.is_err() {
+    if check_permission(&pool, user.user_id, "permission:create").await.is_err()
+    {
             return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
     }
 
@@ -202,9 +207,8 @@ pub async fn list_permissions(
     user: AuthenticatedUser,
 ) -> Result<Json<Vec<PermissionResponse>>, (StatusCode, String)> {
 
-    if check_permission(&pool, user.user_id, "org:update")
-        .await.is_err() {
-            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    if check_permission(&pool, user.user_id, "permission:read").await.is_err() {
+        return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
     }
 
     let permissions = sqlx::query_as!(
@@ -227,8 +231,8 @@ pub async fn assign_permission_to_role(
     Json(payload): Json<AssignPermissionRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
 
-    if check_permission(&pool, user.user_id, "role:assign")
-        .await.is_err() {
+    if check_permission(&pool, user.user_id, "permission:assign").await.is_err()
+    {
             return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
     }
 

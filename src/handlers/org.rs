@@ -7,6 +7,46 @@ use crate::models::{CreateOrgRequest, OrgResponse, UpdateOrgRequest, AssignRoleR
 
 
 
+// auth chechk
+async fn check_permission(
+    pool: &PgPool,
+    user_id: Uuid,
+    org_id: Uuid,
+    required_permission: &str,
+) -> Result<(), (StatusCode, String)> {
+
+    let has_access = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 
+            FROM memberships m
+            JOIN member_roles mr ON m.id = mr.membership_id
+            JOIN roles r ON mr.role_id = r.id
+            JOIN role_permissions rp ON r.id = rp.role_id
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE m.user_id = $1 
+              AND m.organization_id = $2 
+              AND r.organization_id = $2
+              AND p.name = $3
+        )
+        "#,
+        user_id,
+        org_id,
+        required_permission
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Auth Engine processing error".to_string()))?;
+
+    if Some(true) == has_access {
+        Ok(())
+    } else {
+        Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()))
+    }
+}
+
+
+
 // 1. Create a new organization and bootstrap its administrative roles
 pub async fn create_organization(
     State(pool): State<PgPool>,
@@ -61,52 +101,18 @@ pub async fn create_organization(
 
     // PERMISSIONS
 
-    let org_update_perm = sqlx::query!(
-        "SELECT id FROM permissions WHERE name = 'org:update'")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
-
     sqlx::query!(
-        "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
-        role.id,
-        org_update_perm.id
+        r#"
+        INSERT INTO role_permissions (role_id, permission_id)
+        SELECT $1, id FROM permissions
+        "#,
+        role.id
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to bootstrap global permissions: {}", e)))?;
 
-
-    let role_create_perm = sqlx::query!(
-        "SELECT id FROM permissions WHERE name = 'role:create'")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
-
-    sqlx::query!(
-        "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
-        role.id,
-        role_create_perm.id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-
-    let role_assign_perm = sqlx::query!(
-        "SELECT id FROM permissions WHERE name = 'role:assign'")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Permission missing".to_string()))?;
-
-    sqlx::query!(
-        "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)",
-        role.id,
-        role_assign_perm.id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-
+    
 
     // audit logs
     sqlx::query!(
@@ -126,58 +132,22 @@ pub async fn create_organization(
     Ok(Json(OrgResponse { id: org.id, name: org.name }))
 }
 
-// 2. Secured Resource Example: Adding a user inside an organization
+// 2.Adding a user inside an organization
 pub async fn create_user_in_org(
     State(pool): State<PgPool>,
     user: AuthenticatedUser,
     Path(org_id): Path<Uuid>,
 ) -> Result<String, (StatusCode, String)> {
     // Call validation logic
-    check_permission(&pool, user.user_id, org_id, "user:create").await?;
+    if check_permission(&pool, user.user_id,org_id, "membership:create").await.is_err()
+    {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
+
+    
 
     Ok(format!("Successfully authorized! User {} was allowed to perform 'user:create' inside Organization {}", user.user_id, org_id))
 }
-
-
-// auth chechk
-async fn check_permission(
-    pool: &PgPool,
-    user_id: Uuid,
-    org_id: Uuid,
-    required_permission: &str,
-) -> Result<(), (StatusCode, String)> {
-
-    let has_access = sqlx::query_scalar!(
-        r#"
-        SELECT EXISTS (
-            SELECT 1 
-            FROM memberships m
-            JOIN member_roles mr ON m.id = mr.membership_id
-            JOIN roles r ON mr.role_id = r.id
-            JOIN role_permissions rp ON r.id = rp.role_id
-            JOIN permissions p ON rp.permission_id = p.id
-            WHERE m.user_id = $1 
-              AND m.organization_id = $2 
-              AND r.organization_id = $2
-              AND p.name = $3
-        )
-        "#,
-        user_id,
-        org_id,
-        required_permission
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Auth Engine processing error".to_string()))?;
-
-    if Some(true) == has_access {
-        Ok(())
-    } else {
-        Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()))
-    }
-}
-
-
 
 // POST /organizations/:org_id/memberships
 pub async fn add_org_member(
@@ -186,10 +156,11 @@ pub async fn add_org_member(
     Path(org_id): Path<Uuid>,
     Json(payload): Json<AssignRoleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // 1. RBAC Validation: Check if the calling actor has permission to manage members
-    check_permission(&pool, user.user_id, org_id, "user:create").await?;
 
-    // 2. Add the target user to memberships table
+    if check_permission(&pool, user.user_id,org_id, "membership:update").await.is_err()
+    {
+            return Err((StatusCode::FORBIDDEN, "Access Denied: You do not have the required permissions for this organization".to_string()));
+    }
     sqlx::query!(
         "INSERT INTO memberships (user_id, organization_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         payload.user_id,
@@ -214,12 +185,13 @@ pub async fn add_org_member(
     Ok(StatusCode::CREATED)
 }
 
-
 // GET /organizations (Lists all organizations the user belongs to)
 pub async fn list_organizations(
     State(pool): State<PgPool>,
     user: AuthenticatedUser,
+
 ) -> Result<Json<Vec<OrgResponse>>, (StatusCode, String)> {
+
 
     let orgs = sqlx::query_as!(
         OrgResponse,
@@ -279,7 +251,7 @@ pub async fn update_organization(
     Path(org_id): Path<Uuid>,
     Json(payload): Json<UpdateOrgRequest>,
 ) -> Result<Json<OrgResponse>, (StatusCode, String)> {
-    // RBAC Check: Ensure the user has permission to update organizations
+    
     check_permission(&pool, user.user_id, org_id, "org:update").await?;
 
     let org = sqlx::query_as!(
@@ -303,6 +275,7 @@ pub async fn assign_role_to_membership(
     Path(membership_id): Path<Uuid>,
     Json(payload): Json<AssignMemberRoleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+
     
     // Verify the membership exists and get the org_id so we can RBAC check
     let membership = sqlx::query!(

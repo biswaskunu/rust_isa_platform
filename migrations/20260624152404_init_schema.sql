@@ -57,4 +57,7 @@ CREATE TABLE member_roles (
 -- Seed basic global permissions immediately
 INSERT INTO permissions (name) VALUES 
 ('user:create'), ('user:read'), ('user:update'), ('user:delete'),
-('org:update'), ('role:create'), ('role:assign');
+('org:update'), ('org:delete'),
+('permission:create'), ('permission:assign'), ('permission:read'), ('permission:delete'),
+('role:create'), ('role:assign'), ('role:update'), ('role:read'), ('role:delete'),
+('membership:create'), ('membership:update'), ('membership:delete');

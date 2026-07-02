@@ -109,7 +109,7 @@ pub async fn login(
         return Err((StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()));
     }
 
-    let access_token  = generate_token(user.id, "access", 15)?;
+    let access_token  = generate_token(user.id, "access", 30)?;
     let refresh_token = generate_token(user.id, "refresh", 60 * 24 * 7)?; // 7 days
 
     let access_hash  = hash_token(&access_token);
@@ -190,7 +190,6 @@ pub async fn logout(
     State(pool): State<PgPool>,
     user: AuthenticatedUser,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // In a real scenario extract the specific session ID from the request.
     // For simplicity, we will revoke all active sessions for this user.
     sqlx::query!(
         "DELETE FROM sessions WHERE user_id = $1",
